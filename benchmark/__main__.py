@@ -1,0 +1,138 @@
+"""Reproducible SentinelOS benchmark.
+
+    python -m benchmark                       # auto provider (QNN if verified-capable, else CPU)
+    python -m benchmark --provider cpu        # force CPU for a comparison run
+    python -m benchmark --iterations 300
+
+Measures, on this machine:
+  * model load time
+  * ML inference latency (single text)
+  * full security-check latency (all scanners + ML + risk + policy + decision), over every demo preset
+  * deterministic-engine-only latency
+  * process memory (resident set) where readable
+
+Writes docs/benchmark-results.md, docs/benchmark-results.json (the UI reads
+this file) and a timestamped raw copy in data/benchmarks/.
+"""
+from __future__ import annotations
+
+import argparse
+import json
+import statistics
+import sys
+import time
+from datetime import datetime, timezone
+from pathlib import Path
+
+ROOT = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(ROOT))
+
+
+def stats(samples: list[float]) -> dict:
+    s = sorted(samples)
+    p95 = s[min(len(s) - 1, int(round(0.95 * (len(s) - 1))))]
+    med = statistics.median(s)
+    return {"n": len(s), "median_ms": round(med, 3), "p95_ms": round(p95, 3), "mean_ms": round(statistics.fmean(s), 3),
+            "min_ms": round(s[0], 3), "max_ms": round(s[-1], 3),
+            "throughput_per_s": round(1000.0 / med, 1) if med > 0 else None}
+
+
+def main() -> None:
+    ap = argparse.ArgumentParser(prog="python -m benchmark")
+    ap.add_argument("--provider", choices=["auto", "qnn", "cpu"], default="auto")
+    ap.add_argument("--iterations", type=int, default=200)
+    ap.add_argument("--warmup", type=int, default=20)
+    ap.add_argument("--no-ml", action="store_true")
+    args = ap.parse_args()
+
+    from sentinel.gateway import Gateway
+    from sentinel.inference.runtime_info import machine_info, network_status, process_rss_mb
+    from sentinel.simulator.presets import PRESETS, PRESETS_BY_ID
+
+    classifier = None
+    if not args.no_ml:
+        from sentinel.inference.classifier import Classifier
+        classifier = Classifier(provider_pref=args.provider)
+        if not classifier.status["available"]:
+            print("ML classifier unavailable:", "; ".join(classifier.status["errors"]))
+            classifier = None
+
+    result = {
+        "timestamp": datetime.now(timezone.utc).isoformat(timespec="seconds"),
+        "machine": machine_info(),
+        "network_at_run": network_status(ttl=0),
+        "config": {"provider_requested": args.provider, "iterations": args.iterations, "warmup": args.warmup},
+        "ml": classifier.status if classifier else {"available": False},
+    }
+
+    if classifier:
+        text = PRESETS_BY_ID["injection"]["request"]["context"]
+        for _ in range(args.warmup):
+            classifier.classify(text)
+        lat = []
+        for _ in range(args.iterations):
+            t0 = time.perf_counter()
+            classifier.classify(text)
+            lat.append((time.perf_counter() - t0) * 1000)
+        result["ml_inference"] = {"input": "injection preset context (128 tokens, padded)", **stats(lat)}
+
+    for label, gw in (("full_pipeline", Gateway(classifier=classifier)), ("rules_only", Gateway(classifier=None))):
+        if label == "full_pipeline" and not classifier:
+            continue
+        reqs = [p["request"] for p in PRESETS]
+        for _ in range(args.warmup):
+            for r in reqs:
+                gw.analyze(r)
+        lat = []
+        for i in range(args.iterations):
+            r = reqs[i % len(reqs)]
+            t0 = time.perf_counter()
+            gw.analyze(r)
+            lat.append((time.perf_counter() - t0) * 1000)
+        result[label] = {"input": f"round-robin over {len(reqs)} demo presets", **stats(lat)}
+
+    result["memory_rss_mb_after"] = process_rss_mb()
+
+    out = ROOT / "docs"
+    raw = ROOT / "data" / "benchmarks"
+    raw.mkdir(parents=True, exist_ok=True)
+    (out / "benchmark-results.json").write_text(json.dumps(result, indent=2), encoding="utf-8")
+    stamp = result["timestamp"].replace(":", "").replace("-", "")
+    (raw / f"benchmark-{stamp}-{args.provider}.json").write_text(json.dumps(result, indent=2), encoding="utf-8")
+    write_markdown(result)
+    print(json.dumps({k: result[k] for k in result if k in ("ml_inference", "full_pipeline", "rules_only")}, indent=2))
+    print("→ docs/benchmark-results.md")
+
+
+def write_markdown(r: dict) -> None:
+    m, ml = r["machine"], r["ml"]
+    na = "Not available"
+    rows = []
+    for key, title in (("ml_inference", "ML inference (one text)"), ("full_pipeline", "Full security check"),
+                       ("rules_only", "Deterministic engine only")):
+        s = r.get(key)
+        rows.append(f"| {title} | {s['median_ms']} | {s['p95_ms']} | {s['mean_ms']} | {s['throughput_per_s']} | {s['n']} |"
+                    if s else f"| {title} | {na} | {na} | {na} | {na} | – |")
+    lines = [
+        "# Benchmark results", "",
+        f"Generated by `python -m benchmark` on {r['timestamp']}. Machine-written; re-run to update.", "",
+        "## Setup", "",
+        f"- Processor: {m['processor']}", f"- OS: {m['os']}", f"- Python: {m['python']} ({m['python_arch']})",
+        f"- ONNX Runtime: {m['onnxruntime']}",
+        f"- Model: {ml.get('model') or na} (`{ml.get('model_file') or na}`)",
+        f"- Execution provider: {ml.get('provider') or na}", f"- Accelerator: {ml.get('accelerator') or na}",
+        f"- CPU fallback disabled: {ml.get('cpu_fallback_disabled', False)}",
+        f"- Model load time: {ml.get('load_time_ms') or na} ms",
+        f"- Network during run: {r['network_at_run']}",
+        f"- Warmup: {r['config']['warmup']}, iterations: {r['config']['iterations']}", "",
+        "## Latency (milliseconds)", "",
+        "| Measurement | Median | p95 | Mean | Per second (1/median) | n |", "|---|---|---|---|---|---|",
+        *rows, "",
+        f"Process memory (resident) after run: {r.get('memory_rss_mb_after') or na} MB", "",
+        "The full security check includes up to two classifier calls (prompt and context are scored separately).",
+    ]
+    (ROOT / "docs" / "benchmark-results.md").write_text("\n".join(lines) + "\n", encoding="utf-8")
+
+
+if __name__ == "__main__":
+    main()

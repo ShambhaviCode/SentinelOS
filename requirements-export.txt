@@ -1,0 +1,8 @@
+# One-time model export + quantization. Any machine with internet; x64 Python works
+# (including x64 Python running under emulation on the Snapdragon PC).
+torch
+transformers
+huggingface_hub
+onnx
+onnxruntime
+numpy

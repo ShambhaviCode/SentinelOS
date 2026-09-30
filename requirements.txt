@@ -1,0 +1,2 @@
+# SentinelOS core (security engine, server, tests) uses only the Python standard library.
+# For the local ML classifier, install requirements-ml.txt.

@@ -1,0 +1,42 @@
+{
+  "version": 1,
+  "risk": {
+    "thresholds": { "MEDIUM": 0.30, "HIGH": 0.60, "CRITICAL": 0.85 },
+    "decision_map": { "LOW": "ALLOW", "MEDIUM": "REQUIRE_APPROVAL", "HIGH": "BLOCK", "CRITICAL": "BLOCK" },
+    "ml_weight": 0.55,
+    "combination_bonus": 0.10,
+    "combination_min_score": 0.30
+  },
+  "file_access": {
+    "workspace_roots": ["C:/SentinelDemo/workspace", "~/SentinelDemo/workspace", "demo/sample_data"],
+    "scope_effects": {
+      "file": "ALLOW",
+      "directory": "REQUIRE_APPROVAL",
+      "recursive": "BLOCK",
+      "profile": "BLOCK",
+      "drive": "BLOCK"
+    },
+    "outside_workspace_effect": "REQUIRE_APPROVAL",
+    "write_effect": "REQUIRE_APPROVAL",
+    "delete_effect": "REQUIRE_APPROVAL",
+    "sensitive_path_markers": [".ssh", ".aws", ".azure", ".env", "appdata", "credentials", "id_rsa", ".git-credentials", "keychain", "system32", "/etc/", "password"]
+  },
+  "network": {
+    "allowed_domains": ["api.workspace.example.test", "docs.example.test"],
+    "unknown_destination_effect": "REQUIRE_APPROVAL"
+  },
+  "email": {
+    "internal_domains": ["example.test"],
+    "external_effect": "REQUIRE_APPROVAL"
+  },
+  "command_execution": {
+    "default_effect": "REQUIRE_APPROVAL",
+    "blocked_patterns": ["rm -rf", "del /s", "rmdir /s", "format ", "mkfs", "curl | sh", "curl|sh", "iwr | iex", "invoke-expression", "-encodedcommand", "powershell -enc", "reg delete", "vssadmin", "cipher /w"]
+  },
+  "cross_cutting": {
+    "block_tool_after_injection": true,
+    "block_sensitive_egress": true,
+    "review_secrets_in_context": true,
+    "secret_score_threshold": 0.60
+  }
+}

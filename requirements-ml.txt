@@ -1,0 +1,5 @@
+# Runtime for the local classifier on a Snapdragon Windows PC.
+# Needs NATIVE ARM64 Python (python -c "import platform; print(platform.machine())" -> ARM64).
+# onnxruntime-qnn ships the QNN Execution Provider and the QNN HTP libraries.
+onnxruntime-qnn
+numpy

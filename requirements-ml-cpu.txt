@@ -1,0 +1,3 @@
+# CPU-only alternative (any platform). Use when onnxruntime-qnn is unavailable.
+onnxruntime
+numpy

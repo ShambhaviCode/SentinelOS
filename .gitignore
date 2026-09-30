@@ -1,0 +1,16 @@
+__pycache__/
+*.pyc
+.venv*/
+.pytest_cache/
+node_modules/
+data/audit.jsonl
+data/profiles/
+data/benchmarks/
+models/**/*.onnx
+models/**/*.data
+models/**/_tok/
+sentinel_env.txt
+.env
+*.log
+.DS_Store
+Thumbs.db
