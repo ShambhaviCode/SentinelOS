@@ -240,6 +240,6 @@ SentinelOS reduces risk; it does not make an agent secure.
 
 **Built by Shambhavi M.K.** · [mkshambhavi966@gmail.com](mailto:mkshambhavi966@gmail.com)
 
-MIT License · All demo data is synthetic
+MIT License
 
 </div>
