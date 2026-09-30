@@ -1,223 +1,245 @@
-# SentinelOS
+<div align="center">
 
-## Local AI Security for Autonomous Agents
+# 🛡️ SentinelOS
 
-SentinelOS is a security boundary that runs on the device. It checks what an AI agent reads
-and what it wants to do, and returns **allow**, **require approval** or **block**, with the
-evidence behind the decision.
+### On-Device Security for AI Agents
 
-> **Verification status.** Anything that depends on the Snapdragon hardware (processor,
-> execution provider, NPU execution, latency) is filled in by scripts that write evidence to
-> `docs/`. Where those files say *NOT YET RUN*, no claim is made.
->
-> | Evidence | File | Status |
-> |---|---|---|
-> | Machine inspection | [docs/environment.md](docs/environment.md) | see file |
-> | NPU execution | [docs/npu-verification.md](docs/npu-verification.md) | see file |
-> | Benchmarks | [docs/benchmark-results.md](docs/benchmark-results.md) | see file |
-> | Offline operation | [docs/offline-verification.md](docs/offline-verification.md) | see file |
+**Checks what an AI agent reads and what it wants to do, before it acts, on the device.**
 
-## The Problem
+![Python](https://img.shields.io/badge/python-3.10%2B-3776AB?logo=python&logoColor=white)
+![ONNX Runtime](https://img.shields.io/badge/ONNX%20Runtime-QNN%20%7C%20CPU-005CED)
+![Target](https://img.shields.io/badge/target-Snapdragon%20NPU-3253DC?logo=qualcomm&logoColor=white)
+![Tests](https://img.shields.io/badge/tests-37%20passing-1E9E6A)
+![License](https://img.shields.io/badge/license-MIT-lightgrey)
 
-AI agents no longer only answer questions. They read documents, open files, call tools and
-send messages using the permissions of the person who launched them. Anything the agent reads
-can contain instructions, and anything in its context can leak through a tool call.
+<img src="docs/screenshots/threat-detection.png" alt="SentinelOS blocking a prompt injection hidden in a vendor document" width="860">
 
-## Why Agentic AI Changes Security
+<sub>A prompt injection hidden in a vendor document, caught line by line and blocked.</sub>
+
+</div>
+
+---
+
+## ⚡ The short version
+
+AI agents read documents, open files and send messages **with your permissions**.
+One poisoned document can tell an agent to *"ignore your previous instructions"*, and it will try.
+
+**SentinelOS sits between the agent and everything it can touch.** Every prompt, every piece of
+content the agent reads and every action it proposes passes through one local gateway and comes
+out as **Allow**, **Needs approval** or **Block**, with the evidence behind the decision.
+
+No cloud. No API keys. No data leaves the device.
+
+```bash
+git clone https://github.com/ShambhaviCode/SentinelOS.git && cd SentinelOS
+python -m sentinel.server --no-ml        # zero dependencies: Python standard library only
+# open http://127.0.0.1:8765 → Agent console → "Prompt injection" → Run security check
+```
+
+---
+
+## 🎯 The problem
 
 | Before | Now |
 |---|---|
-| User → application → model → answer | User → agent → reads data → calls tools → takes actions |
-| The model's output is shown to a person | The model's output becomes an action |
-| Untrusted text is displayed | Untrusted text can steer behaviour |
+| User → app → model → answer | User → **agent** → reads data → **calls tools** → **takes actions** |
+| Model output is shown to a person | Model output **becomes an action** |
+| Untrusted text is displayed | Untrusted text **can steer behaviour** |
 
-The dangerous moment is **between the agent deciding and the agent acting.** Traditional
-application security checks users and endpoints; it does not look at a document telling an
-agent to "ignore your previous instructions" or at an agent asking for the whole Documents
-folder to answer a one-line question.
+Three failures matter most once text turns into action:
 
-## Our Solution
+- **Prompt injection.** Content the agent reads carries instructions, and the agent follows them.
+- **Data exposure.** Credentials in the agent's context leak through an email, an upload or a log.
+- **Excessive privilege.** The agent asks for your whole Documents folder to answer a one-line question.
 
-Every agent request (prompt, context and proposed tool action) goes through one gateway:
+Traditional application security checks *who* is calling. It doesn't check whether a document is
+instructing the agent, or whether a file request fits the task. SentinelOS checks both.
 
+---
+
+## 🧭 How it works
+
+```mermaid
+flowchart LR
+    A[AI agent] --> G[Agent gateway]
+    subgraph B["SentinelOS boundary: on the device"]
+        G --> P[Injection rules<br/>8 weighted categories]
+        G --> M[Local ML classifier<br/>DistilBERT · ONNX Runtime]
+        G --> D[Data scan<br/>secrets · personal data]
+        G --> T[Tool scan<br/>scope · paths · destinations]
+        P & M & D & T --> R[Risk engine<br/>explainable scoring]
+        R --> PE[Policy engine<br/>config/policies.json]
+    end
+    PE --> AL([✅ Allow])
+    PE --> AP([⏸️ Needs approval])
+    PE --> BL([⛔ Block])
+    PE --> AU[(Audit trail)]
 ```
-Agent ──► SentinelOS gateway
-            ├─ Prompt scanner      (injection patterns)
-            ├─ Data scanner        (secrets, personal data)
-            ├─ Tool scanner        (scope, paths, commands, destinations)
-            └─ Local ML classifier (injection probability, on device)
-                    │
-               Risk engine ──► Policy engine ──► Decision: Allow / Require approval / Block
-                                                      │
-                                                 Audit timeline
-```
 
-## Key Capabilities
+<div align="center">
+<img src="docs/screenshots/trust-graph.png" alt="Agent trust graph showing an excessive file-access request blocked" width="860">
 
-- **Prompt-injection detection.** Eight weighted rule categories that tolerate paraphrasing,
-  plus a local DistilBERT classifier as a second signal.
-- **Sensitive-data detection.** API tokens, private keys, passwords, Luhn-checked card
-  numbers, ID formats, email and phone. Secrets are redacted before display or logging.
-- **Tool-risk analysis.** Least-privilege checks on file scope, sensitive paths, commands,
-  network destinations and email recipients, including broad requests with vague reasons.
-- **Explainable decisions.** A risk score, severity, model probability, rule-by-rule evidence,
-  the policy that decided, why it matters, and a recommended action.
-- **Human in the loop.** Medium-risk requests wait for approve or deny, recorded in the audit
-  log.
-- **Agent trust graph.** A diagram of each request's path through the boundary, drawn from
-  that request's real scores.
-- **Honest runtime panel.** Model, runtime, execution provider, accelerator, load time and
-  network state are all read from the machine.
+<sub>The agent trust graph, drawn from real event data: a recursive request for the whole Documents folder is stopped at the tool scan.</sub>
+</div>
 
-## Architecture
+---
 
-See [docs/architecture.md](docs/architecture.md) for the component diagram and API. Scoring
-is documented in [docs/risk-model.md](docs/risk-model.md), and the threat model and
-limitations in [docs/security.md](docs/security.md).
-
-## Local AI
+## ✨ Design choices
 
 | | |
 |---|---|
-| Model | `acuvity/distilbert-base-uncased-prompt-injection-v0.1` (Apache-2.0, see [docs/model.md](docs/model.md)) |
-| Format | ONNX, static `[1,128]` input; QDQ-quantized (uint16 activations, uint8 weights) for the NPU |
-| Runtime | ONNX Runtime |
-| Tokenizer | Pure-Python WordPiece, parity-checked against Hugging Face |
-| Role | Second signal for prompt injection. It can hold a request for review; blocking needs rule evidence too |
+| 🧠 **Hybrid detection** | Deterministic rules for repeatable, explainable results, plus a local transformer classifier as a second opinion. |
+| 🔒 **Model can't block alone** | The ML signal is capped by design: it can hold a request for review, but blocking needs rule evidence too, so a false positive never silently stops real work. |
+| 🧰 **Guards actions, not just text** | Least-privilege checks on file scope, sensitive paths, shell commands, network and email destinations. |
+| 🔎 **Every decision is explained** | Risk score, severity, model confidence, rule-by-rule evidence, the deciding policy, and a recommended next step. |
+| 🙋 **Human in the loop** | Uncertain requests wait for approve or deny, recorded in the audit trail. |
+| 🤐 **Secrets stay secret** | Credentials are redacted before they reach the UI or the log. |
+| 📏 **Honest telemetry** | Model, provider, accelerator, latency and network state are read from the machine. Anything unknown says *Not detected*. |
 
-## Snapdragon Optimization
+---
 
-The execution path targets the Snapdragon NPU through ONNX Runtime's **QNN Execution
-Provider** on the **HTP backend**:
+## ⚙️ Built for Snapdragon
 
-1. The model is exported with static shapes and QDQ-quantized with ONNX Runtime's QNN
-   quantization helpers, because the HTP backend runs quantized graphs.
-2. The session is created with `session.disable_cpu_ep_fallback = 1`. ONNX Runtime then
-   refuses to create the session unless **every** node runs on QNN, so a successful session
-   is itself evidence that nothing silently fell back to the CPU.
-3. `tools/verify_npu.py` adds ORT profiling (counting nodes per execution provider), compares
-   outputs with a CPU reference, and writes the verdict to `docs/npu-verification.md`.
-4. If any step fails, SentinelOS runs the same model on the CPU, still locally, and the UI
-   says so.
+The ML classifier is engineered for the **Qualcomm Hexagon NPU** through ONNX Runtime's
+**QNN Execution Provider (HTP backend)**:
 
-Measured latency on the target laptop: **see [docs/benchmark-results.md](docs/benchmark-results.md)**.
+1. **Export** to a static-shape ONNX graph (`[1, 128]`), because the NPU needs fixed shapes.
+2. **Quantize** to QDQ (16-bit activations, 8-bit weights) with ONNX Runtime's QNN tools, because HTP runs quantized graphs.
+3. **Run with CPU fallback disabled** (`session.disable_cpu_ep_fallback = 1`). ONNX Runtime refuses to start the session unless *every* operation runs on the NPU, so nothing can quietly fall back to the CPU.
+4. **Prove it.** `tools/verify_npu.py` counts nodes per execution provider with the ORT profiler, checks outputs against a CPU reference, and writes a machine-generated verdict.
 
-## Security Model
+If any step isn't supported, SentinelOS runs the same model on the CPU, still fully local, and the UI says so.
 
-Untrusted context is weighted highest. Tool requests in the same turn as a likely injection
-are blocked. Secrets leaving the device are blocked. Policies in `config/policies.json` can
-only make a decision stricter. Full details and limitations are in
-[docs/security.md](docs/security.md).
+| Evidence | Generated by | File |
+|---|---|---|
+| Machine inspection | `scripts/inspect_env.ps1` | [docs/environment.md](docs/environment.md) |
+| NPU verification | `tools/verify_npu.py` | [docs/npu-verification.md](docs/npu-verification.md) |
+| Benchmarks | `python -m benchmark` | [docs/benchmark-results.md](docs/benchmark-results.md) |
+| Offline check | manual checklist | [docs/offline-verification.md](docs/offline-verification.md) |
 
-## Demo
+> These files are written by scripts on the target laptop and are never edited by hand. Where a file says *NOT YET RUN*, no claim is made.
 
-Five synthetic, deterministic scenarios in the **Agent console**:
+---
 
-| Scenario | Result |
-|---|---|
-| Safe request: read one workspace file | Low, **Allow** |
-| Command needs review: `git status` | Medium, **Require approval** |
-| Prompt injection hidden in a vendor document | Critical, **Block** |
-| Credentials about to be emailed outside the organization | Critical, **Block** |
-| Recursive access to the whole Documents folder, "Need additional context." | Critical, **Block** |
+## 🎬 Demo scenarios
 
-These are results from the deterministic engine, asserted by the tests. All demo data is
-synthetic ([demo/README.md](demo/README.md)).
+All data is synthetic. Every scenario is deterministic, and the tests assert each result.
 
-## Benchmark
+| Scenario | What the agent attempted | Decision |
+|---|---|---|
+| Safe request | Read one project file to summarize it | ✅ **Allow** |
+| Command review | Run `git status` | ⏸️ **Needs approval** |
+| Prompt injection | Follow instructions hidden in a vendor document | ⛔ **Block** |
+| Data exposure | Email a service key and password to an outside address | ⛔ **Block** |
+| Excessive access | List all of Documents, recursively, for "additional context" | ⛔ **Block** |
 
-```powershell
-python -m benchmark                  # auto provider
-python -m benchmark --provider cpu   # CPU comparison
-```
+<div align="center">
+<img src="docs/screenshots/agent-console.png" alt="SentinelOS agent console" width="860">
+</div>
 
-This records the model, provider, accelerator, warmup, iterations, median, p95, mean,
-throughput and memory, and writes `docs/benchmark-results.md` and `.json` (read by the
-Benchmarks page) plus raw JSON in `data/benchmarks/`.
+---
 
-## Installation
+## 🚀 Quick start
 
-Prerequisites: Python 3.10+ (**native ARM64** Python for the NPU path). Node 18+ only if you
-rebuild the UI.
-
-```powershell
-git clone <repo-url> sentinelos
-cd sentinelos
-powershell -ExecutionPolicy Bypass -File scripts\setup.ps1       # add -Cpu for CPU-only
-```
-
-Model export (one time): see [docs/laptop-runbook.md](docs/laptop-runbook.md), step 3.
-
-## Running
-
-```powershell
-powershell -ExecutionPolicy Bypass -File scripts\run.ps1
-# or, on any OS without the model:
+**Rules engine only (any OS, zero dependencies):**
+```bash
 python -m sentinel.server --no-ml
 ```
 
-Open http://127.0.0.1:8765, go to **Agent console**, choose **Prompt injection**, and select
-**Run security check**.
+**With the local ML classifier on CPU:**
+```bash
+python -m venv .venv
+.venv/Scripts/python -m pip install -r requirements-export.txt   # macOS/Linux: .venv/bin/python
+.venv/Scripts/python tools/export_model.py
+.venv/Scripts/python -m sentinel.server
+```
 
-To rebuild the UI: `cd app/frontend && npm install && npm run build`.
+**On a Snapdragon Windows PC (NPU path):** follow [docs/laptop-runbook.md](docs/laptop-runbook.md). It needs native ARM64 Python and `onnxruntime-qnn`, and covers setup, export, quantization, NPU verification and benchmarking step by step.
 
-## Tests
+Then open **http://127.0.0.1:8765**.
 
-```powershell
+---
+
+## 🧪 Tests
+
+```bash
 python -m unittest discover -s tests -t . -v
 ```
 
-The 37 tests cover the safe prompt, injection prompts (including paraphrases), sensitive
-data and redaction, safe data, excessive file scope, allowed and blocked tools, network and
-command policies, risk calculation, the ML cap, policy evaluation, final decisions, preset
-determinism, and the ML code path (with a synthetic fixture model; skipped without
-onnxruntime).
+The 37 tests cover injection (including paraphrases), sensitive data and redaction, file scope,
+blocked and allowed tools, network and command policies, the risk formula, the ML cap, policy
+precedence, final decisions, preset determinism, and the ML inference path.
 
-## Limitations
+---
 
-- Rule-based detection finds known patterns. Novel, encoded, multilingual or multi-turn
-  attacks can evade it, and the classifier's accuracy on real-world traffic has not been
-  measured here.
+## 🗂️ Project structure
+
+```
+sentinel/
+  gateway.py            one entry point, stage timings, audit
+  security/             prompt · data · tool scanners, risk, policy, decision
+  inference/            ONNX Runtime classifier, pure-Python WordPiece tokenizer, runtime info
+  simulator/            synthetic demo scenarios
+  server.py             standard-library HTTP server (localhost only)
+app/frontend/           React + TypeScript UI (prebuilt in dist/)
+config/policies.json    editable policies
+tools/                  export · QNN quantization · NPU verification
+benchmark/              python -m benchmark
+docs/                   architecture, security, risk model, model, deployment, evidence
+tests/                  37 tests
+```
+
+---
+
+## 📚 Documentation
+
+[Architecture](docs/architecture.md) ·
+[Security model](docs/security.md) ·
+[Risk model](docs/risk-model.md) ·
+[Model](docs/model.md) ·
+[Deployment](docs/deployment.md) ·
+[Laptop runbook](docs/laptop-runbook.md)
+
+---
+
+## ⚖️ Limitations
+
+- Rules detect **known patterns**. Novel, encoded, multilingual or multi-turn attacks can evade them, and the classifier's real-world accuracy hasn't been measured yet.
 - Sensitive-data detection depends on recognizable formats.
-- The agent is a deterministic test environment, not a production agent framework.
-- The classifier scores the first 128 tokens of each field.
-- The local API has no authentication (single-user, localhost only).
-- NPU execution, latency and offline operation are claimed only as far as the files in `docs/`
-  show.
+- The agent is a deterministic **test environment**, not a production integration.
+- The classifier scores the first 128 tokens of each field; the rules scan the full text.
+- The local API has no authentication (single user, localhost only).
 
-## Future Roadmap
+SentinelOS reduces risk; it does not make an agent secure.
 
-- Integrations with agent frameworks and MCP tool servers through the same gateway contract
-- Central policy management for teams, with signed policy bundles
-- Continuous behavioural monitoring across a whole agent session, not single turns
-- Stronger model-based detection: multilingual, encoded payloads, larger evaluation sets
-- More tool connectors (browsers, cloud storage, calendars)
+---
 
-## Technology Stack
+## 🛣️ Roadmap
 
-Python (standard library) · ONNX Runtime (QNN Execution Provider / CPU) · DistilBERT ·
-React 18 + TypeScript + Vite · IBM Plex (bundled)
+- Agent-framework and MCP tool-server integrations through the same gateway
+- Team-wide policy management with signed policy bundles
+- Session-level behavioural monitoring across multi-step agent runs
+- Multilingual and encoded-payload detection, with larger evaluation sets
+- More tool connectors: browsers, cloud storage, calendars
 
-## Snapdragon AI Lab Challenge Alignment
+---
 
-### Technical Implementation
-A working hybrid detector (deterministic rules plus a local transformer classifier), an
-explainable risk model, a policy engine and an audit trail, with 37 automated tests. The
-Snapdragon path uses ONNX Runtime's QNN HTP backend with CPU fallback disabled and
-profiler-based verification. The evidence lives in `docs/npu-verification.md` and
-`docs/benchmark-results.md`.
+## 🏆 Snapdragon AI Lab Challenge alignment
 
-### Application Use Case & Innovation
-Security for autonomous agents: checking what an agent reads and does *before* it acts,
-covering prompt injection, data exposure and least-privilege tool use, with a person in the
-loop for uncertain cases.
+| Criterion | Evidence |
+|---|---|
+| **Technical implementation** | Hybrid detector, explainable risk model, policy engine and audit trail. QNN HTP path with fallback disabled and profiler verification. 37 tests. |
+| **Use case & innovation** | Security at the moment an agent turns text into action: injection, data exposure and least-privilege tool use, with a person in the loop. |
+| **Deployment & accessibility** | Fully local, zero-dependency core, prebuilt UI with bundled fonts, Windows-on-ARM scripts, CPU fallback everywhere. No accounts or keys. |
+| **Presentation & documentation** | Architecture, security, risk and model docs, a step-by-step runbook, machine-generated evidence files, and repeatable demos. |
 
-### Deployment & Accessibility
-Runs entirely on the laptop. The core has zero third-party Python dependencies, the UI is
-prebuilt with bundled fonts, and there are setup, run and inspection scripts for Windows on
-ARM plus a CPU fallback for any machine. No cloud accounts or API keys.
+---
 
-### Presentation & Documentation
-Architecture, security, risk model, model, deployment and a step-by-step runbook. Evidence
-files are machine-generated. Five repeatable demo scenarios, plus a pitch script and deck
-content in `submission/`.
+<div align="center">
+
+**Built by Shambhavi M.K.** · [mkshambhavi966@gmail.com](mailto:mkshambhavi966@gmail.com)
+
+MIT License · All demo data is synthetic
+
+</div>
