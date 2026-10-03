@@ -238,7 +238,7 @@ SentinelOS reduces risk; it does not make an agent secure.
 
 <div align="center">
 
-**Built by Shambhavi **
+## Built by Shambhavi 
 
 MIT License
 
